@@ -232,28 +232,48 @@ static ssize_t device_write(struct file *filep,
                             loff_t *offset)
 {
     long pid;
-    char *message;
-
+    char *message, *tmp_message;
+    char delim[] = " ";  
+    char *token; 
     char add_message[] = "add", del_message[] = "del";
     if (len < sizeof(add_message) - 1 && len < sizeof(del_message) - 1)
         return -EAGAIN;
 
     message = kmalloc(len + 1, GFP_KERNEL);
     memset(message, 0, len + 1);
+    tmp_message = kmalloc(len + 1, GFP_KERNEL);
+    memset(tmp_message, 0, len + 1);
+
     copy_from_user(message, buffer, len);
+    memcpy(tmp_message, message, len);
+
     if (!memcmp(message, add_message, sizeof(add_message) - 1)) {
-        kstrtol(message + sizeof(add_message), 10, &pid);
-        hide_process(pid);
+        token = strsep(&message, delim); // skip "add"
+        while((token = strsep(&message, delim))){
+            //printk(token);  
+            kstrtol(token, 10, &pid);
+            //printk("pid %ld\n", pid);
+            hide_process(pid);  
+        } 
+        //kstrtol(message + sizeof(add_message), 10, &pid);
+        //hide_process(pid);
     } else if (!memcmp(message, del_message, sizeof(del_message) - 1)) {
-        kstrtol(message + sizeof(del_message), 10, &pid);
-        unhide_process(pid);
+        token = strsep(&message, delim); // skip "del"
+        while((token = strsep(&message, delim))){
+            //printk(token); 
+            kstrtol(token, 10, &pid);
+            //printk("pid %ld\n", pid); 
+            unhide_process(pid); 
+        } 
     } else {
         kfree(message);
+        kfree(tmp_message);
         return -EAGAIN;
     }
 
     *offset = len;
     kfree(message);
+    kfree(tmp_message);
     return len;
 }
 

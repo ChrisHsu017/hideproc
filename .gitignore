@@ -1,0 +1,33 @@
+# NB: It is dangerous to add stuff here, have the change reviewed if
+# uncertain.
+
+# You can have your own private ignore list. See how here:
+# http://stackoverflow.com/questions/1753070/git-ignore-files-only-locally
+
+####################################################################
+#
+# Blacklisted entries:
+# --------------------
+# The following entries are NOT allowed in this file. Why is that?
+# It is dangerous to have too many patterns in the gitignore file
+# because it makes it harder to see the difference between 2 repos,
+# and harder to determine what kind of files you have in your dirty
+# repo.
+#
+####################################################################
+#
+# .dep
+# .hex
+# .o
+# reqs/pynrfjprog/nrfjprog.egg-info/
+#
+####################################################################
+
+*.cmd
+*.ko
+*.o
+*.mod
+*.mod.c
+*.o.d
+*.symvers
+*.order
