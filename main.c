@@ -5,6 +5,58 @@
 #include <linux/module.h>
 #include <linux/proc_fs.h>
 
+#define KPROBE_PATCH
+//#define h33p_LIVEPATCH
+#ifdef h33p_LIVEPATCH 
+
+#include "kallsyms.h"     
+#include "ksyms.h"        
+
+KSYMDEF(kvm_lock);
+KSYMDEF(vm_list);
+#endif
+
+#ifdef KPROBE_PATCH
+#include <linux/kprobes.h>
+#define KPROBE_PRE_HANDLER(fname) static int __kprobes fname(struct kprobe *p, struct pt_regs *regs)
+
+long unsigned int kln_addr = 0;
+unsigned long (*kln_pointer)(const char *name) = NULL;
+
+static struct kprobe kp0, kp1;
+
+KPROBE_PRE_HANDLER(handler_pre0)
+{
+  kln_addr = (--regs->ip);
+  
+  return 0;
+}
+
+KPROBE_PRE_HANDLER(handler_pre1)
+{
+  return 0;
+}
+
+static int do_register_kprobe(struct kprobe *kp, char *symbol_name, void *handler)
+{
+  int ret;
+
+  kp->symbol_name = symbol_name;
+  kp->pre_handler = handler;
+
+  ret = register_kprobe(kp);
+  if (ret < 0) {
+    pr_err("register_probe() for symbol %s failed, returned %d\n", symbol_name, ret);
+    return ret;
+  }
+
+  pr_info("Planted kprobe for symbol %s at %p\n", symbol_name, kp->addr);
+
+  return ret;
+}
+#endif
+
+
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("National Cheng Kung University, Taiwan");
 
@@ -19,7 +71,12 @@ struct ftrace_hook {
 
 static int hook_resolve_addr(struct ftrace_hook *hook)
 {
+    #ifdef KPROBE_PATCH
+    hook->address = kln_pointer(hook->name);
+    #endif
+    #ifdef h33p_LIVEPATCH
     hook->address = kallsyms_lookup_name(hook->name);
+    #endif
     if (!hook->address) {
         printk("unresolved symbol: %s\n", hook->name);
         return -ENOENT;
@@ -63,7 +120,7 @@ static int hook_install(struct ftrace_hook *hook)
     return 0;
 }
 
-#if 0
+
 void hook_remove(struct ftrace_hook *hook)
 {
     int err = unregister_ftrace_function(&hook->ops);
@@ -73,7 +130,7 @@ void hook_remove(struct ftrace_hook *hook)
     if (err)
         printk("ftrace_set_filter_ip() failed: %d\n", err);
 }
-#endif
+
 
 typedef struct {
     pid_t id;
@@ -107,7 +164,12 @@ static struct pid *hook_find_ge_pid(int nr, struct pid_namespace *ns)
 
 static void init_hook(void)
 {
+    #ifdef KPROBE_PATCH
+    real_find_ge_pid = (find_ge_pid_func) kln_pointer("find_ge_pid");
+    #endif
+    #ifdef h33p_LIVEPATCH
     real_find_ge_pid = (find_ge_pid_func) kallsyms_lookup_name("find_ge_pid");
+    #endif
     hook.name = "find_ge_pid";
     hook.func = hook_find_ge_pid;
     hook.orig = &real_find_ge_pid;
@@ -208,11 +270,41 @@ static const struct file_operations fops = {
 
 #define MINOR_VERSION 1
 #define DEVICE_NAME "hideproc"
-
+static int dev_major;
 static int _hideproc_init(void)
 {
-    int err, dev_major;
+    int err;
     dev_t dev;
+    int ret;
+#ifdef KPROBE_PATCH
+    ret = do_register_kprobe(&kp0, "kallsyms_lookup_name", handler_pre0);
+    if (ret < 0)
+      return ret;
+
+    ret = do_register_kprobe(&kp1, "kallsyms_lookup_name", handler_pre1);
+    if (ret < 0) {
+      unregister_kprobe(&kp0);
+      return ret;
+    }
+
+    unregister_kprobe(&kp0);
+    unregister_kprobe(&kp1);
+
+    pr_info("kallsyms_lookup_name address = 0x%lx\n", kln_addr);
+
+    kln_pointer = (unsigned long (*)(const char *name)) kln_addr;
+
+    pr_info("kallsyms_lookup_name address = 0x%lx\n", kln_pointer("kallsyms_lookup_name"));
+    
+#endif
+#ifdef h33p_LIVEPATCH
+    if ((ret = init_kallsyms()))
+		return ret;
+
+	KSYMINIT_FAULT(kvm_lock);
+	KSYMINIT_FAULT(vm_list);
+
+#endif
     printk(KERN_INFO "@ %s\n", __func__);
     err = alloc_chrdev_region(&dev, 0, MINOR_VERSION, DEVICE_NAME);
     dev_major = MAJOR(dev);
@@ -231,8 +323,22 @@ static int _hideproc_init(void)
 
 static void _hideproc_exit(void)
 {
+    pid_node_t *proc, *tmp_proc;
+    dev_t dev = MKDEV(dev_major, MINOR_VERSION);
     printk(KERN_INFO "@ %s\n", __func__);
     /* FIXME: ensure the release of all allocated resources */
+    list_for_each_entry_safe (proc, tmp_proc, &hidden_proc, list_node) {
+        list_del(&proc->list_node);
+        kfree(proc);
+    }   
+
+    hook_remove(&hook);
+    device_destroy(hideproc_class, dev);
+    class_destroy(hideproc_class);
+    cdev_del(&cdev);
+    
+    unregister_chrdev_region(dev, MINOR_VERSION);   
+    
 }
 
 module_init(_hideproc_init);
