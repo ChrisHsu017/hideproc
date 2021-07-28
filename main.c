@@ -232,7 +232,7 @@ static ssize_t device_write(struct file *filep,
                             loff_t *offset)
 {
     long pid;
-    char *message, *tmp_message;
+    char *message;
     char delim[] = " ";  
     char *token; 
     char add_message[] = "add", del_message[] = "del";
@@ -241,8 +241,6 @@ static ssize_t device_write(struct file *filep,
 
     message = kmalloc(len + 1, GFP_KERNEL);
     memset(message, 0, len + 1);
-    tmp_message = kmalloc(len + 1, GFP_KERNEL);
-    memset(tmp_message, 0, len + 1);
 
     copy_from_user(message, buffer, len);
     memcpy(tmp_message, message, len);
